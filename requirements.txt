@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+pydantic
+openai
+psycopg[binary]
+pgvector
+python-dotenv
