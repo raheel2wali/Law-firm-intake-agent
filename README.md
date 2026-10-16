@@ -32,7 +32,7 @@ curl localhost:8000/health
 ## The build log
 
 - [x] Part 1: The Blueprint — repo skeleton, architecture, roadmap
-- [ ] Part 2: The Brain (RAG over firm knowledge)
+- [x] Part 2: The Brain (RAG over firm knowledge)
 - [ ] Part 3: The Ears (qualification dialog)
 - [ ] Part 4: The Conflict Check
 - [ ] Part 5: The Hands (booking + matter tools)
@@ -41,3 +41,22 @@ curl localhost:8000/health
 - [ ] Part 8: Evals & Quality
 - [ ] Part 9: Integrations
 - [ ] Part 10: Ship It
+
+## Part 2: The Brain (RAG over firm knowledge)
+
+The agent can only say what the firm actually says. `data/firm_faqs.md` is
+the source of truth: practice areas, fee structures, FAQs, office info.
+
+- `app/ingest.py` loads the markdown docs, cleans them, and chunks them
+  at 400 tokens with 50 overlap.
+- `app/rag.py` embeds chunks into pgvector, retrieves top-8, reranks to
+  top-3, and answers with per-answer citations.
+
+The rule that matters: a wrong fee quote is a liability. If retrieval
+can't support the question, the agent says it doesn't know and routes
+to a human instead of inventing an answer.
+
+```bash
+export DATABASE_URL=postgresql://localhost:5432/lexintake
+python -m app.rag   # init store + ingest data/
+```
