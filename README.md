@@ -33,7 +33,7 @@ curl localhost:8000/health
 
 - [x] Part 1: The Blueprint — repo skeleton, architecture, roadmap
 - [x] Part 2: The Brain (RAG over firm knowledge)
-- [ ] Part 3: The Ears (qualification dialog)
+- [x] Part 3: The Ears (qualification dialog)
 - [ ] Part 4: The Conflict Check
 - [ ] Part 5: The Hands (booking + matter tools)
 - [ ] Part 6: Ethics Guardrails
@@ -59,4 +59,27 @@ to a human instead of inventing an answer.
 ```bash
 export DATABASE_URL=postgresql://localhost:5432/lexintake
 python -m app.rag   # init store + ingest data/
+```
+
+## Part 3: The Ears (qualification dialog)
+
+Intake is an interview, not a chat. The attorney needs five facts:
+who, what, when, where, and how urgent. Everything else is noise.
+
+- `app/intake.py` holds the schema and the interview loop. Each turn
+  extracts facts from what the caller said, tracks what's still missing,
+  and asks only the single most important missing fact.
+- Urgency is a fast deterministic check (arrest, ER, a court date within
+  48 hours) that overrides the model. Urgent callers never wait for
+  more questions.
+- `should_book()` stops the interview when the facts are complete, the
+  caller is urgent, or six turns have passed. The attorney gets a clean
+  intake card: five lines, not five pages.
+
+```python
+from app.intake import Intake, run_turn
+
+intake = Intake()
+result = run_turn(intake, "I was in a car accident last night downtown")
+# {"action": "ask", "question": "Can I get your name?", ...}
 ```
