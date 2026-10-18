@@ -34,7 +34,7 @@ curl localhost:8000/health
 - [x] Part 1: The Blueprint — repo skeleton, architecture, roadmap
 - [x] Part 2: The Brain (RAG over firm knowledge)
 - [x] Part 3: The Ears (qualification dialog)
-- [ ] Part 4: The Conflict Check
+- [x] Part 4: The Conflict Check
 - [ ] Part 5: The Hands (booking + matter tools)
 - [ ] Part 6: Ethics Guardrails
 - [ ] Part 7: The Voice Channel
@@ -82,4 +82,33 @@ from app.intake import Intake, run_turn
 intake = Intake()
 result = run_turn(intake, "I was in a car accident last night downtown")
 # {"action": "ask", "question": "Can I get your name?", ...}
+```
+
+## Part 4: The Conflict Check
+
+This is the gate that makes the project legal tech instead of a chatbot.
+Before the firm takes on any matter, every name in the room is checked
+against the firm's conflict database: current clients, opposing parties,
+related matters, even consultations that never became cases.
+
+- `app/conflicts.py` normalizes names (accents, punctuation, org
+  suffixes) and fuzzy-matches them against the conflict list, so
+  "Apex Construction LLC" and "Apex construction" still match.
+- A hit is a hard stop: the intake halts, the caller gets a polite
+  decline with zero details about the match, and the attorney gets a
+  notification with the full details. Telling a stranger "we have a
+  relationship with the other side" would itself be a breach.
+- `data/conflicts.sample.json` is a fictional sample list for
+  development. Real firms would load this from their case management
+  system.
+- The wiring lives in `run_turn()` in `app/intake.py`: the gate runs
+  after fact extraction and before anything can book. Nothing proceeds
+  past it.
+
+```python
+from app.intake import Intake, run_turn
+
+intake = Intake()
+result = run_turn(intake, "I'm Daniel Reyes, calling about the other driver, Apex Construction")
+# {"action": "decline", "message": "Thanks for sharing...", "alert": "CONFLICT CHECK HIT...", "reason": "conflict"}
 ```

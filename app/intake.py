@@ -14,6 +14,8 @@ from datetime import datetime
 
 from openai import OpenAI
 
+from app.conflicts import attorney_alert, check_intake, polite_decline
+
 _client = OpenAI()
 
 URGENT_PATTERNS = [
@@ -135,6 +137,14 @@ def should_book(intake: Intake) -> bool:
 def run_turn(intake: Intake, caller_message: str) -> dict:
     """One full interview turn. Returns what to do next."""
     extract_facts(intake, caller_message)
+    # The conflict check is a hard gate: it runs before anything can book,
+    # and a hit stops the intake outright. Nothing proceeds past it.
+    hits = check_intake(intake)
+    if hits:
+        intake.history.append({"role": "assistant", "content": polite_decline(),
+                               "at": datetime.utcnow().isoformat()})
+        return {"action": "decline", "message": polite_decline(),
+                "alert": attorney_alert(intake, hits), "reason": "conflict"}
     if should_book(intake):
         return {"action": "book", "summary": intake.summary(),
                 "reason": "urgent" if intake.urgency == "high" else "facts complete"}
