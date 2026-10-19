@@ -35,7 +35,7 @@ curl localhost:8000/health
 - [x] Part 2: The Brain (RAG over firm knowledge)
 - [x] Part 3: The Ears (qualification dialog)
 - [x] Part 4: The Conflict Check
-- [ ] Part 5: The Hands (booking + matter tools)
+- [x] Part 5: The Hands (booking + matter tools)
 - [ ] Part 6: Ethics Guardrails
 - [ ] Part 7: The Voice Channel
 - [ ] Part 8: Evals & Quality
@@ -111,4 +111,50 @@ from app.intake import Intake, run_turn
 intake = Intake()
 result = run_turn(intake, "I'm Daniel Reyes, calling about the other driver, Apex Construction")
 # {"action": "decline", "message": "Thanks for sharing...", "alert": "CONFLICT CHECK HIT...", "reason": "conflict"}
+```
+
+## Part 5: The Hands (booking + matter tools)
+
+Understanding without action is just a very smart answering machine, so
+LexIntake gets exactly three tools, and nothing else:
+
+- `book_consultation` reserves a slot, after checking it is free first
+- `create_matter` opens the matter with the intake card attached
+- `send_followup` confirms, reminds, or reschedules by text or email
+
+Three rules wrap every write:
+
+1. **Read freely, write carefully.** Reads need no permission. Every write
+   is proposed first and sits in a pending queue with a token; it only
+   executes when approved through `POST /confirm`. Tokens expire after
+   15 minutes.
+2. **Dry-run mode for testing.** `DRY_RUN=1` points the tools at in-memory
+   fakes, so the whole pipeline runs against a fake calendar and fake
+   matters. With it off, the adapters raise `IntegrationNotWired` instead
+   of pretending — the real calendar and case-management clients land in
+   Part 9 (Integrations).
+3. **Scoped permissions.** Each tool declares a scope
+   (`write:calendar`, `write:matters`, `write:followups`); the deployment
+   grants them via `LEXINTAKE_SCOPES`. Narrow it down in production.
+
+Everything is audited: every proposal, approval, decline, and execution
+lands in `data/audit.log.jsonl`, a trail a partner can skim in
+30 seconds. Dry-run once caught a double-booking on a 60-second-stale
+calendar cache; the slot is now re-read at booking time, not before.
+
+```python
+from app.intake import Intake, run_turn
+from app.tools import run_booking, confirm_action
+
+intake = Intake()
+result = run_turn(intake, "...")   # {"action": "book", ...}
+proposed = run_booking(result["summary"], slot="2026-10-21T10:00", contact="caller")
+# each entry: {"status": "pending_confirmation", "token": "...", ...}
+```
+
+```bash
+curl localhost:8000/pending
+curl -X POST localhost:8000/confirm \
+  -H 'Content-Type: application/json' \
+  -d '{"token": "<token>", "approved": true}'
 ```
