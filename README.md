@@ -36,8 +36,8 @@ curl localhost:8000/health
 - [x] Part 3: The Ears (qualification dialog)
 - [x] Part 4: The Conflict Check
 - [x] Part 5: The Hands (booking + matter tools)
-- [ ] Part 6: Ethics Guardrails
-- [ ] Part 7: The Voice Channel
+- [x] Part 6: Ethics Guardrails
+- [x] Part 7: The Voice Channel
 - [ ] Part 8: Evals & Quality
 - [ ] Part 9: Integrations
 - [ ] Part 10: Ship It
@@ -157,4 +157,81 @@ curl localhost:8000/pending
 curl -X POST localhost:8000/confirm \
   -H 'Content-Type: application/json' \
   -d '{"token": "<token>", "approved": true}'
+```
+
+## Part 6: Ethics Guardrails
+
+The non-negotiable part: this agent never gives legal advice. Not a
+hint, not a guess — one wrong answer would be the unauthorized practice
+of law, and the firm owns every word the agent says.
+
+The guardrails are deliberately dumb. Pattern matching is the point:
+the refusal has to hold even when the model really wants to help.
+
+- **Advice firewall.** `guard_turn()` runs on every user message before
+  the LLM ever sees it. Advice-seeking phrasings ("do I have a case",
+  "should I sue", "just tell me yes") get a plain refusal plus an
+  offer to book a consultation. The net is intentionally wide here —
+  a false positive just means a human reviews it.
+- **Disclaimer on every conversation.** "I'm an intake assistant, not
+  an attorney." No fine print.
+- **Attorney review queue.** Advice-seeking callers who keep pushing
+  don't get argued with — the redacted transcript lands in
+  `data/review_queue.jsonl` for human eyes first.
+- **PII redaction.** SSNs, emails, and phone numbers are stripped with
+  `redact_pii()` before anything is logged or queued. Everything
+  downstream only sees the redacted version.
+- **Prompt-injection tripwires.** "Ignore your instructions", roleplay
+  tricks, override attempts — checked first, because an injected
+  message can imitate anything, including an advice request. Hard stop,
+  not a cleverer answer.
+
+`evals/eval_basic.py` is the eval harness for the risky conversations:
+the desperate caller, the polite injection, the roleplay trick, plus
+redaction checks. 12/12 passing. Guardrails that are never tested are
+just wishes — new failure modes get a new case here before they get a
+fix.
+
+```bash
+python evals/eval_basic.py
+```
+
+## Part 7: The Voice Channel
+
+Most intakes start as phone calls, so this week LexIntake got a voice
+front door. Two paths in, one pipeline out:
+
+- **After-hours answering.** The provider posts every call to
+  `POST /voice`. An answered call runs its transcript through the same
+  interview loop from Parts 1-6: qualification, the conflict check, and
+  the ethics guardrails all ride along.
+- **Missed-call text-back.** A rang-out call texts back within the
+  minute ("sorry we missed you, tell me what this is about") and opens
+  a partial intake, so the caller's reply picks up where the ringing
+  stopped instead of landing in Monday's voicemail pile.
+
+`app/voice.py` holds the glue: payload normalization, the text-back,
+and `run_transcript()`, which feeds transcribed caller turns through
+`run_turn()` with `guard_turn()` on every segment. The caller on a
+shaky midnight call is exactly who might ask "do I have a case"; the
+refusal policy doesn't care which channel it came in on.
+
+The telephony itself stays with the provider. Nothing here dials or
+texts for real — the live adapters land with the real integrations in
+Part 9.
+
+```python
+from app.voice import run_transcript
+
+result = run_transcript("+15551234567", [
+    "I was in a car accident last night downtown",
+    "My name is Daniel Reyes",
+])
+# {"action": "book", "replies": [...], "summary": "..."}
+```
+
+```bash
+curl -X POST localhost:8000/voice \
+  -H 'Content-Type: application/json' \
+  -d '{"CallSid": "CA123", "From": "+15551234567", "CallStatus": "no-answer"}'
 ```

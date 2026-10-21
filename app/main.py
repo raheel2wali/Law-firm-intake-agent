@@ -1,10 +1,11 @@
-"""FastAPI front door: a health check, plus the confirmation endpoint
-that approves the agent's proposed writes (Part 5: The Hands)."""
+"""FastAPI front door: a health check, the confirmation endpoint that
+approves the agent's proposed writes (Part 5: The Hands), and the voice
+webhook that feeds phone calls into the intake pipeline (Part 7)."""
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import tools
+from app import tools, voice
 from app.tools import IntegrationNotWired, ScopeDenied
 
 app = FastAPI(title="LexIntake")
@@ -39,3 +40,17 @@ def confirm(req: ConfirmRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(exc))
     except IntegrationNotWired as exc:
         raise HTTPException(status_code=501, detail=str(exc))
+
+
+@app.post("/voice")
+def voice_webhook(payload: dict) -> dict:
+    """A telephony provider posts here on every call event.
+
+    - Answered after hours: run the transcript through the intake loop.
+    - Missed: text back within the minute and open a partial intake, so
+      the caller's reply picks up where the ringing stopped.
+    """
+    status = payload.get("CallStatus", "completed")
+    if status in ("no-answer", "busy", "failed"):
+        return voice.handle_missed_call(payload)
+    return voice.handle_voice_call(payload)
