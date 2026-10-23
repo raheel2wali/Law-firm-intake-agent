@@ -38,8 +38,8 @@ curl localhost:8000/health
 - [x] Part 5: The Hands (booking + matter tools)
 - [x] Part 6: Ethics Guardrails
 - [x] Part 7: The Voice Channel
-- [ ] Part 8: Evals & Quality
-- [ ] Part 9: Integrations
+- [x] Part 8: Evals & Quality
+- [x] Part 9: Integrations
 - [ ] Part 10: Ship It
 
 ## Part 2: The Brain (RAG over firm knowledge)
@@ -234,4 +234,87 @@ result = run_transcript("+15551234567", [
 curl -X POST localhost:8000/voice \
   -H 'Content-Type: application/json' \
   -d '{"CallSid": "CA123", "From": "+15551234567", "CallStatus": "no-answer"}'
+```
+
+## Part 8: Evals & Quality
+
+A friendly-sounding intake can still be a bad intake. So I stopped
+grading on vibes and built a quality loop with three scores:
+
+- **Completeness** — did the intake capture who / what / when / where /
+  urgency? A five-fact fraction, nothing more.
+- **Qualification accuracy** — did we route to the right practice area
+  with the right priority? The urgency the caller stated drives the
+  priority, deterministically.
+- **Consultation show-rate** — of the appointments the agent booked,
+  how many callers actually showed up? A booked consult nobody attends
+  is worse than a missed call.
+
+`app/quality.py` holds the graders plus the intake log: every intake
+lands in `data/intakes.jsonl`, and `GET /stats` aggregates the three
+scores over everything the agent has ever booked.
+
+`evals/eval_quality.py` is the mystery-shopper set: 25 scripted caller
+personas (the 2 AM rear-ended caller, the arrest tonight, the terse
+caller who gives you three words, the caller the deterministic matcher
+can't classify). Every persona runs through the same graders with an
+accuracy floor, and exit code 0 requires all of them green.
+
+The feedback loop that matters: `quality.add_regression_case()` promotes
+any bad intake from production into `data/eval_regressions.jsonl`, and
+the eval harness runs over those cases too. The suite keeps every
+mistake the system ever made, so it can never regress silently. New
+failure modes get a case before they get a fix — same rule as the
+ethics harness in Part 6.
+
+```bash
+python evals/eval_quality.py   # 25/25 mystery shoppers green
+```
+
+```bash
+curl localhost:8000/stats
+# {"total_intakes": ..., "avg_completeness": ..., "qualification_accuracy": ..., "consultation_show_rate": ...}
+```
+
+## Part 9: Integrations
+
+An agent that lives alone dies alone. All the clever parts before this
+one end at a proposed booking; this part is where the proposal actually
+lands in the firm's systems.
+
+- **One adapter interface, three connectors.** `app/integrations.py`
+  defines `CalendarAdapter`, `CaseManagementAdapter`, and
+  `MessagingAdapter`, with Google Calendar, a Clio-style case
+  management API, and Twilio/SMTP messaging as the default live
+  adapters. The deployment picks per system through `LEXINTAKE_CALENDAR`,
+  `LEXINTAKE_CASEMGMT`, and `LEXINTAKE_MESSAGING`, so a firm can wire the
+  calendar but leave case management on stubs while IT sets up access.
+- **Loud failure, never silent.** Every live adapter checks its
+  credentials up front and raises `IntegrationNotWired` without them.
+  A booking that vanishes between systems is worse than no booking at
+  all, it lies to the attorney. The slot check re-reads the calendar at
+  booking time; there is no stale cache (Part 5 already caught that
+  bug once).
+- **The follow-up engine.** `plan_followups()` lays out three
+  touchpoints per booking: an instant confirmation, a reminder a day
+  before, and a check-in when someone no-shows. Each one is proposed
+  through the same pending-confirmation queue as every other write, so
+  a human can still say no before a single text goes out.
+- **Tools wiring.** `app/tools.py` now resolves its adapters from here:
+  stubs in dry-run mode, the environment-picked adapters otherwise,
+  constructed lazily so missing credentials fail at execution time.
+
+```bash
+curl localhost:8000/integrations
+# {"calendar": {"adapter": "stub", "wired": false}, ...}
+```
+
+```python
+from app.integrations import plan_followups, no_show
+
+plan_followups("STUB-BOOK-001", "2026-10-26T10:00", "+15551234567")
+# [{"kind": "confirmation", ...}, {"kind": "reminder", ...}, {"kind": "no_show_checkin", ...}]
+
+no_show("STUB-BOOK-001", "+15551234567")
+# {"kind": "no_show_checkin", "message": "We missed you today ..."}
 ```

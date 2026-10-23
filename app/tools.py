@@ -5,11 +5,13 @@ asking, but nothing writes to a real system on its own. A write is always
 proposed first: it lands in a pending queue with a token, and it only
 executes when someone approves it through POST /confirm (see app/main.py).
 
-Dry-run mode (DRY_RUN=1) points the tools at in-memory fakes so the whole
-pipeline can be tested without touching real systems. Part 9
-(Integrations) will plug real calendar and case-management clients in
-behind the same adapter interface; until then the live adapters raise
-IntegrationNotWired instead of silently pretending.
+Dry-run mode (DRY_RUN=1) points the tools at in-memory stub adapters so
+the whole pipeline can be tested without touching real systems. With it
+off, the adapters come from app/integrations.py (Part 9): Google Calendar,
+a Clio-style case management API, and Twilio/SMTP messaging, picked per
+system through the LEXINTAKE_* environment variables. Until the real
+credentials are set, those adapters raise IntegrationNotWired instead of
+silently pretending.
 """
 
 from __future__ import annotations
@@ -19,6 +21,9 @@ import os
 import secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from app import integrations
+from app.integrations import IntegrationNotWired  # re-exported; main.py imports it from here
 
 # ---------------------------------------------------------------------------
 # Scopes: each tool declares what it needs, the deployment grants what the
@@ -46,11 +51,6 @@ PENDING_TTL = timedelta(minutes=15)
 _pending: dict[str, dict] = {}  # token -> pending action
 
 
-class IntegrationNotWired(Exception):
-    """Raised when a write is approved but the real system behind the
-    adapter isn't connected yet (wired up in Part 9)."""
-
-
 class ScopeDenied(PermissionError):
     """The agent tried to use a tool outside its granted scopes."""
 
@@ -62,67 +62,33 @@ def require_scope(tool_name: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Adapters: where writes actually go. DryRun is an in-memory fake for
-# testing. Live raises until Part 9 wires the real calendar/matter clients.
+# Adapters: where writes actually go. The stub adapters (in-memory, no
+# network) run in dry-run mode for testing. Otherwise the factories in
+# app/integrations.py pick the real adapters from the environment, and
+# they are constructed lazily, on first use, so missing credentials fail
+# loudly at execution time rather than at import time.
 # ---------------------------------------------------------------------------
 
 
-class _DryRunCalendar:
-    def __init__(self) -> None:
-        self.bookings: list[dict] = []
-
-    def slot_free(self, slot: str) -> bool:
-        return all(b["slot"] != slot for b in self.bookings)
-
-    def book(self, *, slot: str, contact: str, intake_summary: str) -> dict:
-        ref = f"DRY-BOOK-{len(self.bookings) + 1:03d}"
-        self.bookings.append(
-            {"ref": ref, "slot": slot, "contact": contact, "summary": intake_summary}
-        )
-        return {"ref": ref, "slot": slot}
+def _calendar():
+    if DRY_RUN:
+        return _stubs.setdefault("calendar", integrations.StubCalendar())
+    return integrations.make_calendar()
 
 
-class _DryRunMatters:
-    def __init__(self) -> None:
-        self.matters: list[dict] = []
-
-    def create(self, *, summary: str) -> dict:
-        ref = f"DRY-MATTER-{len(self.matters) + 1:03d}"
-        self.matters.append({"ref": ref, "summary": summary})
-        return {"ref": ref}
+def _matters():
+    if DRY_RUN:
+        return _stubs.setdefault("matters", integrations.StubMatters())
+    return integrations.make_case_management()
 
 
-class _DryRunFollowups:
-    def __init__(self) -> None:
-        self.sent: list[dict] = []
-
-    def send(self, *, booking_ref: str, channel: str, message: str) -> dict:
-        self.sent.append(
-            {"booking_ref": booking_ref, "channel": channel, "message": message}
-        )
-        return {"booking_ref": booking_ref, "channel": channel}
+def _followups():
+    if DRY_RUN:
+        return _stubs.setdefault("followups", integrations.StubMessaging())
+    return integrations.make_messaging()
 
 
-class _LiveAdapters:
-    """Placeholder for the real integrations (Part 9). Fails loudly
-    rather than pretending to book."""
-
-    def slot_free(self, slot: str) -> bool:  # noqa: ARG002
-        raise IntegrationNotWired("calendar not wired yet (Part 9)")
-
-    def book(self, **kwargs) -> dict:  # noqa: ARG002
-        raise IntegrationNotWired("calendar not wired yet (Part 9)")
-
-    def create(self, **kwargs) -> dict:  # noqa: ARG002
-        raise IntegrationNotWired("case management not wired yet (Part 9)")
-
-    def send(self, **kwargs) -> dict:  # noqa: ARG002
-        raise IntegrationNotWired("messaging not wired yet (Part 9)")
-
-
-_calendar = _DryRunCalendar() if DRY_RUN else _LiveAdapters()
-_matters = _DryRunMatters() if DRY_RUN else _LiveAdapters()
-_followups = _DryRunFollowups() if DRY_RUN else _LiveAdapters()
+_stubs: dict[str, object] = {}  # dry-run only: shared stub state across calls
 
 
 # ---------------------------------------------------------------------------
@@ -209,11 +175,11 @@ def confirm_action(token: str, *, approved: bool, note: str = "") -> dict:
 def _execute(action: dict) -> dict:
     tool, args = action["tool"], action["args"]
     if tool == "book_consultation":
-        return _calendar.book(**args)
+        return _calendar().book(**args)
     if tool == "create_matter":
-        return _matters.create(summary=args["intake_summary"])
+        return _matters().create(summary=args["intake_summary"])
     if tool == "send_followup":
-        return _followups.send(**args)
+        return _followups().send(**args)
     raise ValueError(f"unknown tool {tool}")
 
 
@@ -226,7 +192,7 @@ def book_consultation(intake_summary: str, slot: str, contact: str) -> dict:
     """Propose a consultation booking. The slot is checked first (a read,
     free of charge); the write itself needs confirmation."""
     require_scope("book_consultation")
-    if not _calendar.slot_free(slot):
+    if not _calendar().slot_free(slot):
         return {"status": "slot_taken", "slot": slot}
     return _propose(
         "book_consultation",

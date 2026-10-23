@@ -1,11 +1,12 @@
 """FastAPI front door: a health check, the confirmation endpoint that
-approves the agent's proposed writes (Part 5: The Hands), and the voice
-webhook that feeds phone calls into the intake pipeline (Part 7)."""
+approves the agent's proposed writes (Part 5: The Hands), the voice
+webhook that feeds phone calls into the intake pipeline (Part 7), and
+the quality dashboard endpoint (Part 8: Evals & Quality)."""
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
-from app import tools, voice
+from app import integrations, quality, tools, voice
 from app.tools import IntegrationNotWired, ScopeDenied
 
 app = FastAPI(title="LexIntake")
@@ -40,6 +41,23 @@ def confirm(req: ConfirmRequest) -> dict:
         raise HTTPException(status_code=403, detail=str(exc))
     except IntegrationNotWired as exc:
         raise HTTPException(status_code=501, detail=str(exc))
+
+
+@app.get("/stats")
+def stats() -> dict:
+    """The quality dashboard (Part 8): the three scores over everything
+    the agent has ever booked — completeness, qualification accuracy,
+    and consultation show-rate. If these are moving in the right
+    direction, the intake is getting better."""
+    return quality.aggregate_stats()
+
+
+@app.get("/integrations")
+def integration_status() -> dict:
+    """Which systems are wired right now (Part 9): calendar, case
+    management, messaging. A firm can wire the calendar but leave case
+    management on stubs while IT sets up API access."""
+    return integrations.integration_status()
 
 
 @app.post("/voice")
