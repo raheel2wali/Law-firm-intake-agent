@@ -1,7 +1,10 @@
 """FastAPI front door: a health check, the confirmation endpoint that
 approves the agent's proposed writes (Part 5: The Hands), the voice
 webhook that feeds phone calls into the intake pipeline (Part 7), and
-the quality dashboard endpoint (Part 8: Evals & Quality)."""
+the quality dashboard endpoint (Part 8: Evals & Quality). Part 10
+adds a root endpoint so a firm checking the deployment sees what is
+running instead of a 404.
+"""
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
@@ -10,6 +13,22 @@ from app import integrations, quality, tools, voice
 from app.tools import IntegrationNotWired, ScopeDenied
 
 app = FastAPI(title="LexIntake")
+
+
+@app.get("/")
+def index() -> dict:
+    """What this deployment serves. Useful on day one of a pilot."""
+    return {
+        "service": "lexintake",
+        "endpoints": [
+            "/health",
+            "/pending",
+            "/confirm",
+            "/stats",
+            "/integrations",
+            "/voice",
+        ],
+    }
 
 
 @app.get("/health")

@@ -318,3 +318,38 @@ plan_followups("STUB-BOOK-001", "2026-10-26T10:00", "+15551234567")
 no_show("STUB-BOOK-001", "+15551234567")
 # {"kind": "no_show_checkin", "message": "We missed you today ..."}
 ```
+
+## Part 10: Ship It
+
+Ten parts, one working agent. The pilot version of LexIntake is
+everything from Parts 1-9, plus the boring parts that make it
+shippable: a deployment guide, a pre-ship checklist, and a root
+endpoint that tells you what is running.
+
+- **Deployment notes.** `DEPLOYMENT.md` covers the run command, the
+  environment variables, and the before-you-ship checklist: both eval
+  suites green, `/integrations` honest about what is wired, `/stats`
+  baselined on day one, and the attorney review queue checked daily
+  at first.
+- **Main polish.** `app/main.py` gains a `GET /` endpoint that
+  reports the service name and the endpoints it serves, so a firm
+  checking the deployment sees something useful instead of a 404.
+  Nothing else changed: the intake loop, the confirmation gate, and
+  the guardrails are exactly what Parts 1-9 built and tested.
+
+What broke along the way, honestly: the agent asked too many
+questions early on and callers hung up; a stale calendar cache
+nearly double-booked a consultation; one test intake sailed past a
+conflict flag because a name was spelled two ways. Each failure
+became an eval case first and a fix second, which is the loop the
+whole series was really about.
+
+What is next is a real pilot with a real firm: real callers, real
+edge cases, real show-rates. After that, multi-language support and
+deeper case-management sync, in whatever order the evals say is
+weakest.
+
+```bash
+curl localhost:8000/
+# {"service": "lexintake", "endpoints": ["/health", "/pending", "/confirm", "/stats", "/integrations", "/voice"]}
+```
