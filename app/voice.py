@@ -13,6 +13,7 @@ that land with the real integrations in Part 9.
 
 from datetime import datetime
 
+from app import callbacks
 from app.intake import Intake, run_turn
 from app.guardrails import guard_turn, redact_pii, with_disclaimer
 
@@ -42,18 +43,24 @@ def parse_call_payload(payload: dict) -> dict:
 
 def handle_missed_call(payload: dict, firm_name: str = "the firm") -> dict:
     """A call came in, rang out, and the firm didn't pick up. Don't log a
-    voicemail for Monday; text back within the minute and open an intake."""
+    voicemail for Monday; text back within the minute and open an intake.
+
+    Bonus Part 1: the missed call also opens a Callback Card, so staff
+    work it from a queue instead of a voicemail pile."""
     call = parse_call_payload(payload)
     message = TEXT_BACK_TEMPLATE.format(firm_name=firm_name)
     # The transcript is empty (nobody picked up), but the phone number and
     # timestamp are the seed for an intake the moment the caller replies.
     intake = Intake()
+    card = callbacks.create_callback_card(
+        phone=call["from"], call_id=call["call_id"])
     return {
         "call_id": call["call_id"],
         "action": "text_back",
         "to": call["from"],
         "message": message,
         "at": datetime.utcnow().isoformat(),
+        "callback_card_id": card["id"],
         "note": "caller reply continues the same interview loop via /voice",
     }
 
