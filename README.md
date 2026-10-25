@@ -40,7 +40,15 @@ curl localhost:8000/health
 - [x] Part 7: The Voice Channel
 - [x] Part 8: Evals & Quality
 - [x] Part 9: Integrations
-- [ ] Part 10: Ship It
+- [x] Part 10: Ship It
+- [x] Bonus Part 1: The Callback — missed calls open a callback card
+  (name, case type, urgency signal pre-filled) with a 2-minute SLA
+  timer; staff work the queue via `GET /callbacks`. See
+  `app/callbacks.py`, wired into the missed-call path in `app/voice.py`.
+- [x] Bonus Part 2: The Importer — CSV import for conflicts, FAQs, and
+  matters with a dry-run preview (what would be added, duplicates, bad
+  rows) before anything writes. `POST /import` with `dry_run: true`
+  previews; `dry_run: false` applies. See `app/importer.py`.
 
 ## Part 2: The Brain (RAG over firm knowledge)
 
